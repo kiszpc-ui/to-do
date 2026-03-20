@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Todo" />
+  <meta name="theme-color" content="#ffffff" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { height: 100vh; overflow: hidden; }
+    .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 10; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; height: 100vh; width: 200px;
+      background: #fff; border-right: 1px solid #e8e8e8;
+      display: flex; flex-direction: column; padding: 12px 0;
+      z-index: 20; transform: translateX(-100%); transition: transform 0.2s ease;
+    }
+    .sidebar.open { transform: translateX(0); }
+    @media (min-width: 600px) {
+      .sidebar { position: relative; transform: none !important; width: 160px; flex-shrink: 0; }
+      .sidebar-overlay { display: none !important; }
+      .menu-btn { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+    const STORAGE_KEY = "todo_simple_v1";
+
+    function load() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || { projects: [], tasks: [] }; }
+      catch { return { projects: [], tasks: [] }; }
+    }
+    function save(d) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {} }
+    function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+    function diffDays(ds) {
+      if (!ds) return null;
+      const d = new Date(ds + "T00:00:00"), t = new Date(); t.setHours(0,0,0,0);
+      return Math.ceil((d - t) / 86400000);
+    }
+
+    const COLORS = ["#6366f1","#ec4899","#f97316","#10b981","#3b82f6","#8b5cf6","#ef4444","#14b8a6"];
+
+    function App() {
+      const [data, setData] = useState(load);
+      const [selProj, setSelProj] = useState(null);
+      const [newTask, setNewTask] = useState("");
+      const [newDeadline, setNewDeadline] = useState("");
+      const [newProjName, setNewProjName] = useState("");
+      const [addingProj, setAddingProj] = useState(false);
+      const [filter, setFilter] = useState("active");
+      const [dismissed, setDismissed] = useState({});
+      const [reordering, setReordering] = useState(false);
+      const [sidebarOpen, setSidebarOpen] = useState(false);
+      const [confirmTask, setConfirmTask] = useState(null); // task to confirm completion
+
+      useEffect(() => { save(data); }, [data]);
+
+      const mut = fn => setData(p => { const n = fn(JSON.parse(JSON.stringify(p))); save(n); return n; });
+
+      const reminders = data.tasks.filter(t => {
+        if (t.done || !t.deadline || dismissed[t.id]) return false;
+        const d = diffDays(t.deadline);
+        return d !== null && d <= 3;
+      }).sort((a, b) => diffDays(a.deadline) - diffDays(b.deadline));
+
+      const addProject = () => {
+        if (!newProjName.trim()) return;
+        const color = COLORS[data.projects.length % COLORS.length];
+        mut(d => { d.projects.push({ id: uid(), name: newProjName.trim(), color }); return d; });
+        setNewProjName(""); setAddingProj(false);
+      };
+
+      const deleteProject = (pid) => {
+        if (!confirm("プロジェクトとタスクを削除しますか？")) return;
+        mut(d => { d.projects = d.projects.filter(p => p.id !== pid); d.tasks = d.tasks.filter(t => t.projectId !== pid); return d; });
+        if (selProj === pid) setSelProj(null);
+      };
+
+      const moveProject = (pid, dir) => {
+        mut(d => {
+          const i = d.projects.findIndex(p => p.id === pid);
+          const j = i + dir;
+          if (j < 0 || j >= d.projects.length) return d;
+          [d.projects[i], d.projects[j]] = [d.projects[j], d.projects[i]];
+          return d;
+        });
+      };
+
+      const addTask = () => {
+        if (!newTask.trim() || !selProj) return;
+        mut(d => { d.tasks.push({ id: uid(), title: newTask.trim(), projectId: selProj, deadline: newDeadline || null, done: false, createdAt: Date.now() }); return d; });
+        setNewTask(""); setNewDeadline("");
+      };
+
+      // チェックで完了→確認ダイアログ、完了済み→即戻す
+      const handleCheck = (task) => {
+        if (!task.done) {
+          setConfirmTask({ ...task, type: "done" });
+        } else {
+          mut(d => { const t = d.tasks.find(x => x.id === task.id); if (t) t.done = false; return d; });
+        }
+      };
+
+      const confirmAction = () => {
+        if (!confirmTask) return;
+        if (confirmTask.type === "done") {
+          mut(d => { const t = d.tasks.find(x => x.id === confirmTask.id); if (t) t.done = true; return d; });
+        } else if (confirmTask.type === "delete") {
+          mut(d => { d.tasks = d.tasks.filter(x => x.id !== confirmTask.id); return d; });
+        }
+        setConfirmTask(null);
+      };
+
+      const deleteTask = (task) => setConfirmTask({ ...task, type: "delete" });
+
+      const tasks = data.tasks
+        .filter(t => {
+          if (selProj && t.projectId !== selProj) return false;
+          if (filter === "active" && t.done) return false;
+          if (filter === "done" && !t.done) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const da = diffDays(a.deadline) ?? 9999;
+          const db = diffDays(b.deadline) ?? 9999;
+          return da - db || a.createdAt - b.createdAt;
+        });
+
+      const proj = (pid) => data.projects.find(p => p.id === pid);
+
+      function reminderLabel(diff) {
+        if (diff < 0) return `${Math.abs(diff)}日超過`;
+        if (diff === 0) return "今日が期限";
+        if (diff === 1) return "明日が期限";
+        return `あと${diff}日`;
+      }
+      function reminderColor(diff) {
+        if (diff <= 0) return { bg:"#fff5f5", border:"#fecaca", dot:"#ef4444", text:"#ef4444" };
+        if (diff <= 1) return { bg:"#fff7ed", border:"#fed7aa", dot:"#f97316", text:"#f97316" };
+        return { bg:"#fffbeb", border:"#fde68a", dot:"#f59e0b", text:"#f59e0b" };
+      }
+
+      const currentProjName = selProj && proj(selProj) ? proj(selProj).name : "すべてのタスク";
+      const currentProjColor = selProj && proj(selProj) ? proj(selProj).color : null;
+
+      const sidebarContent = (
+        <>
+          <div style={{ padding:"0 12px 10px", fontWeight:700, fontSize:12 }}>Todo</div>
+          <SideItem label="すべて" count={data.tasks.filter(t=>!t.done).length} active={selProj===null && !reordering}
+            onClick={() => { setSelProj(null); setReordering(false); setSidebarOpen(false); }} />
+          <div style={{ padding:"10px 12px 4px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <span style={{ fontSize:10, color:"#bbb", letterSpacing:.5, textTransform:"uppercase" }}>Projects</span>
+            <button onClick={() => setReordering(r => !r)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color: reordering ? "#6366f1" : "#bbb", padding:0 }}>
+              {reordering ? "完了" : "並替"}
+            </button>
+          </div>
+          {data.projects.map((p, i) => (
+            reordering ? (
+              <div key={p.id} style={{ display:"flex", alignItems:"center", gap:4, padding:"5px 8px 5px 12px", background:"#fafafa", borderBottom:"1px solid #f0f0f0" }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", background:p.color, flexShrink:0 }} />
+                <span style={{ flex:1, fontSize:11, color:"#444", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{p.name}</span>
+                <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                  <button onClick={() => moveProject(p.id, -1)} disabled={i === 0}
+                    style={{ background:"none", border:"none", cursor: i===0?"default":"pointer", color: i===0?"#ddd":"#888", fontSize:10, padding:"1px 3px", lineHeight:1 }}>▲</button>
+                  <button onClick={() => moveProject(p.id, 1)} disabled={i === data.projects.length - 1}
+                    style={{ background:"none", border:"none", cursor: i===data.projects.length-1?"default":"pointer", color: i===data.projects.length-1?"#ddd":"#888", fontSize:10, padding:"1px 3px", lineHeight:1 }}>▼</button>
+                </div>
+              </div>
+            ) : (
+              <SideItem key={p.id} label={p.name} count={data.tasks.filter(t=>t.projectId===p.id&&!t.done).length}
+                active={selProj===p.id} color={p.color}
+                onClick={() => { setSelProj(p.id); setSidebarOpen(false); }}
+                onDelete={() => deleteProject(p.id)} />
+            )
+          ))}
+          <div style={{ padding:"6px 12px 0" }}>
+            {addingProj ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                <input autoFocus value={newProjName} onChange={e=>setNewProjName(e.target.value)}
+                  onKeyDown={e=>{ if(e.key==="Enter") addProject(); if(e.key==="Escape") setAddingProj(false); }}
+                  placeholder="名前を入力" style={{ border:"1px solid #ddd", borderRadius:5, padding:"4px 7px", fontSize:11, outline:"none", width:"100%", boxSizing:"border-box" }} />
+                <div style={{ display:"flex", gap:4 }}>
+                  <button onClick={addProject} style={{ flex:1, background:"#1a1a1a", color:"#fff", border:"none", borderRadius:5, padding:"4px 0", cursor:"pointer", fontSize:11 }}>追加</button>
+                  <button onClick={()=>setAddingProj(false)} style={{ flex:1, background:"#f0f0f0", color:"#888", border:"none", borderRadius:5, padding:"4px 0", cursor:"pointer", fontSize:11 }}>×</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setAddingProj(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#bbb", fontSize:11, padding:"2px 0", display:"flex", alignItems:"center", gap:4 }}>
+                <span>+</span> 追加
+              </button>
+            )}
+          </div>
+        </>
+      );
+
+      return (
+        <div style={{ display:"flex", flexDirection:"column", height:"100vh", fontFamily:"'Helvetica Neue',Arial,'Hiragino Sans',sans-serif", background:"#f5f5f5", color:"#1a1a1a", fontSize:12 }}>
+
+          {/* Reminder Banner */}
+          {reminders.length > 0 && (
+            <div style={{ background:"#fff", borderBottom:"1px solid #e8e8e8", padding:"8px 12px", display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+              <span style={{ fontSize:10, color:"#bbb", marginRight:2, flexShrink:0 }}>⏰</span>
+              {reminders.map(t => {
+                const diff = diffDays(t.deadline);
+                const c = reminderColor(diff);
+                const p = proj(t.projectId);
+                return (
+                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:5, background:c.bg, border:`1px solid ${c.border}`, borderRadius:6, padding:"3px 8px 3px 6px", fontSize:11 }}>
+                    <span style={{ width:5, height:5, borderRadius:"50%", background:c.dot, flexShrink:0 }} />
+                    {p && <span style={{ color:p.color, fontSize:10 }}>{p.name}・</span>}
+                    <span style={{ color:"#444" }}>{t.title}</span>
+                    <span style={{ color:c.text, fontWeight:600, marginLeft:2 }}>{reminderLabel(diff)}</span>
+                    <button onClick={() => setDismissed(d => ({...d, [t.id]:true}))}
+                      style={{ background:"none", border:"none", cursor:"pointer", color:"#ccc", fontSize:12, padding:"0 0 0 2px", lineHeight:1 }}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display:"flex", flex:1, overflow:"hidden", position:"relative" }}>
+            {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+            <div className={`sidebar${sidebarOpen ? " open" : ""}`}>{sidebarContent}</div>
+
+            {/* Main */}
+            <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+              <div style={{ padding:"10px 12px 0", borderBottom:"1px solid #e8e8e8", background:"#fff" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                  <button className="menu-btn" onClick={() => setSidebarOpen(true)}
+                    style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, padding:"0 4px 0 0", lineHeight:1, color:"#888" }}>☰</button>
+                  {currentProjColor && <span style={{ width:8, height:8, borderRadius:"50%", background:currentProjColor, display:"inline-block", flexShrink:0 }} />}
+                  <span style={{ fontSize:14, fontWeight:700, letterSpacing:-.3, flex:1 }}>{currentProjName}</span>
+                  <span style={{ fontSize:11, color:"#bbb" }}>
+                    {data.tasks.filter(t => selProj ? t.projectId===selProj && !t.done : !t.done).length} 件
+                  </span>
+                </div>
+                <div style={{ display:"flex" }}>
+                  {[["active","未完了"],["done","完了"],["all","すべて"]].map(([v,l]) => (
+                    <button key={v} onClick={() => setFilter(v)} style={{ background:"none", border:"none", borderBottom:`2px solid ${filter===v?"#1a1a1a":"transparent"}`, padding:"5px 10px", cursor:"pointer", fontSize:11, color:filter===v?"#1a1a1a":"#aaa", fontWeight:filter===v?600:400 }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ padding:"8px 12px", background:"#fff", borderBottom:"1px solid #e8e8e8" }}>
+                <div style={{ display:"flex", gap:6 }}>
+                  {!selProj && (
+                    <select value="" onChange={e => { if(e.target.value) setSelProj(e.target.value); }}
+                      style={{ border:"1px solid #ddd", borderRadius:6, padding:"5px 6px", fontSize:11, color:"#666", background:"#fff", cursor:"pointer", outline:"none", maxWidth:90 }}>
+                      <option value="">プロジェクト▾</option>
+                      {data.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  )}
+                  <input value={newTask} onChange={e=>setNewTask(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&addTask()}
+                    placeholder={selProj ? "タスクを入力..." : "プロジェクトを選択"}
+                    disabled={!selProj}
+                    style={{ flex:1, border:"1px solid #ddd", borderRadius:6, padding:"5px 8px", fontSize:11, outline:"none", background:selProj?"#fff":"#fafafa", minWidth:0 }} />
+                  <input type="date" value={newDeadline} onChange={e=>setNewDeadline(e.target.value)}
+                    disabled={!selProj}
+                    style={{ border:"1px solid #ddd", borderRadius:6, padding:"5px 6px", fontSize:11, outline:"none", color:"#666", background:selProj?"#fff":"#fafafa", width:36, opacity:selProj?1:0.4 }} />
+                  <button onClick={addTask} disabled={!selProj||!newTask.trim()}
+                    style={{ background:selProj&&newTask.trim()?"#1a1a1a":"#e8e8e8", color:selProj&&newTask.trim()?"#fff":"#bbb", border:"none", borderRadius:6, padding:"5px 12px", cursor:selProj&&newTask.trim()?"pointer":"default", fontSize:11, fontWeight:600, flexShrink:0 }}>
+                    追加
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ flex:1, overflowY:"auto", padding:"4px 12px 20px" }}>
+                {tasks.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"50px 0", color:"#ddd" }}>
+                    <div style={{ fontSize:24, marginBottom:8 }}>✓</div>
+                    <div style={{ fontSize:11 }}>タスクがありません</div>
+                  </div>
+                )}
+                {tasks.map(task => {
+                  const p = proj(task.projectId);
+                  const diff = diffDays(task.deadline);
+                  const overdue = diff !== null && diff < 0 && !task.done;
+                  const soon = diff !== null && diff >= 0 && diff <= 3 && !task.done;
+                  return (
+                    <div key={task.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid #f0f0f0", opacity:task.done?0.45:1 }}>
+                      <button onClick={() => handleCheck(task)} style={{ width:16, height:16, borderRadius:"50%", border:`1.5px solid ${task.done?"#10b981":"#ccc"}`, background:task.done?"#10b981":"transparent", cursor:"pointer", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>
+                        {task.done && <svg width="8" height="6" viewBox="0 0 10 8"><path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </button>
+                      <span style={{ flex:1, textDecoration:task.done?"line-through":"none", color:task.done?"#bbb":"#1a1a1a", fontSize:13 }}>{task.title}</span>
+                      {!selProj && p && (
+                        <span style={{ fontSize:10, color:p.color, background:p.color+"18", padding:"1px 6px", borderRadius:20, flexShrink:0 }}>{p.name}</span>
+                      )}
+                      {diff !== null && (
+                        <span style={{ fontSize:10, flexShrink:0, color:overdue?"#ef4444":soon?"#f97316":"#ccc", fontWeight:overdue||soon?600:400 }}>
+                          {overdue?`${Math.abs(diff)}日超過`:diff===0?"今日":diff===1?"明日":`${diff}日後`}
+                        </span>
+                      )}
+                      <button onClick={() => deleteTask(task)} style={{ background:"none", border:"none", cursor:"pointer", color:"#ddd", fontSize:14, padding:"0 1px", lineHeight:1, flexShrink:0 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* 完了確認ダイアログ */}
+          {confirmTask && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }}
+              onClick={() => setConfirmTask(null)}>
+              <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:260, textAlign:"center" }}
+                onClick={e => e.stopPropagation()}>
+                {confirmTask.type === "done" ? <div style={{ fontSize:13, fontWeight:600, color:"#1a1a1a", marginBottom:6 }}>完了にしますか？</div> : <div style={{ fontSize:13, fontWeight:600, color:"#ef4444", marginBottom:6 }}>削除しますか？</div>}
+                <div style={{ fontSize:12, color:"#888", marginBottom:20, lineHeight:1.5 }}>{confirmTask.title}</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={() => setConfirmTask(null)}
+                    style={{ flex:1, background:"#f0f0f0", border:"none", borderRadius:8, padding:"10px 0", fontSize:12, cursor:"pointer", color:"#666" }}>
+                    キャンセル
+                  </button>
+                  <button onClick={confirmAction}
+                    style={{ flex:1, background: confirmTask.type === "done" ? "#1a1a1a" : "#ef4444", border:"none", borderRadius:8, padding:"10px 0", fontSize:12, cursor:"pointer", color:"#fff", fontWeight:600 }}>
+                    {confirmTask.type === "done" ? "完了" : "削除"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function SideItem({ label, count, active, color, onClick, onDelete }) {
+      const [hover, setHover] = useState(false);
+      return (
+        <div onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+          style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 12px", cursor:"pointer", background:active?"#f5f5f5":"transparent", borderRight:`2px solid ${active?"#1a1a1a":"transparent"}` }}
+          onClick={onClick}>
+          {color && <span style={{ width:6, height:6, borderRadius:"50%", background:color, flexShrink:0 }} />}
+          <span style={{ flex:1, fontSize:12, color:active?"#1a1a1a":"#666", fontWeight:active?600:400, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{label}</span>
+          {count > 0 && <span style={{ fontSize:10, color:"#bbb" }}>{count}</span>}
+          {onDelete && hover && (
+            <button onClick={e=>{e.stopPropagation();onDelete();}} style={{ background:"none", border:"none", cursor:"pointer", color:"#ccc", fontSize:12, padding:0, lineHeight:1 }}>×</button>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
