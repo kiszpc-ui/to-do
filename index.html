@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Todo" />
+  <meta name="theme-color" content="#ffffff" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { height: 100vh; overflow: hidden; }
+    .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 10; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; height: 100vh; width: 200px;
+      background: #fff; border-right: 1px solid #e8e8e8;
+      display: flex; flex-direction: column; padding: 12px 0;
+      z-index: 20; transform: translateX(-100%); transition: transform 0.2s ease;
+    }
+    .sidebar.open { transform: translateX(0); }
+    @media (min-width: 600px) {
+      .sidebar { position: relative; transform: none !important; width: 160px; flex-shrink: 0; }
+      .sidebar-overlay { display: none !important; }
+      .menu-btn { display: none !important; }
+    }
+    select { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const SUPABASE_URL = "https://oqtgxtnrpgptzoexorkf.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdGd4dG5ycGdwdHpvZXhvcmtmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwODcyNzIsImV4cCI6MjA4OTY2MzI3Mn0.Z18KdnaSvWkfCQv8MpuMqrT657W-2u6s05pWOctWiGk";
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const COLORS = ["#6366f1","#ec4899","#f97316","#10b981","#3b82f6","#8b5cf6","#ef4444","#14b8a6"];
+    const WEEKDAYS = ["日","月","火","水","木","金","土"];
+    const NTH_LABELS = ["第1","第2","第3","第4","第5"];
+
+    function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+    function diffDays(ds) {
+      if (!ds) return null;
+      const d = new Date(ds + "T00:00:00"), t = new Date(); t.setHours(0,0,0,0);
+      return Math.ceil((d - t) / 86400000);
+    }
+    function toISO(d​​​​​​​​​​​​​​​​
