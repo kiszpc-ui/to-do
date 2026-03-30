@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Todo" />
+  <meta name="theme-color" content="#ffffff" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { height: 100vh; overflow: hidden; }
+    .sidebar-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 10; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; height: 100vh; width: 200px;
+      background: #fff; border-right: 1px solid #e8e8e8;
+      display: flex; flex-direction: column; padding: 12px 0;
+      z-index: 20; transform: translateX(-100%); transition: transform 0.2s ease;
+    }
+    .sidebar.open { transform: translateX(0); }
+    @media (min-width: 600px) {
+      .sidebar { position: relative; transform: none !important; width: 160px; flex-shrink: 0; }
+      .sidebar-overlay { display: none !important; }
+      .menu-btn { display: none !important; }
+    }
+    select { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const SUPABASE_URL = "https://oqtgxtnrpgptzoexorkf.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xdGd4dG5ycGdwdHpvZXhvcmtmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQwODcyNzIsImV4cCI6MjA4OTY2MzI3Mn0.Z18KdnaSvWkfCQv8MpuMqrT657W-2u6s05pWOctWiGk";
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const COLORS = ["#6366f1","#ec4899","#f97316","#10b981","#3b82f6","#8b5cf6","#ef4444","#14b8a6"];
+    const WEEKDAYS = ["日","月","火","水","木","金","土"];
+    const NTH_LABELS = ["第1","第2","第3","第4","第5"];
+
+    function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+    function diffDays(ds) {
+      if (!ds) return null;
+      const d = new Date(ds + "T00:00:00"), t = new Date(); t.setHours(0,0,0,0);
+      return Math.ceil((d - t) / 86400000);
+    }
+    function toISO(d) { return d.toISOString().slice(0,10); }
+
+    function nextDeadline(deadline, repeatType, repeatValue) {
+      if (!deadline || !repeatType) return null;
+      const base = new Date(deadline + "T00:00:00");
+      if (repeatType === "weekly") { base.setDate(base.getDate() + 7); return toISO(base); }
+      if (repeatType === "monthly") { base.setMonth(base.getMonth() + 1); return toISO(base); }
+      if (repeatType === "custom") {
+        const rv = repeatValue || "";
+        if (rv.startsWith("ndays:")) { const n = parseInt(rv.split(":")[1]) || 1; base.setDate(base.getDate() + n); return toISO(base); }
+        if (rv.startsWith("nweeks:")) { const n = parseInt(rv.split(":")[1]) || 1; base.setDate(base.getDate() + n * 7); return toISO(base); }
+        if (rv.startsWith("nmonths:")) { const n = parseInt(rv.split(":")[1]) || 1; base.setMonth(base.getMonth() + n); return toISO(base); }
+        if (rv.startsWith("nth:")) {
+          const parts = rv.split(":"); const nthWeek = parseInt(parts[1]); const weekday = parseInt(parts[2]);
+          const next = new Date(base); next.setMonth(next.getMonth() + 1); next.setDate(1);
+          let count = 0;
+          for (let d = 0; d < 31; d++) { if (next.getDay() === weekday) { if (count === nthWeek) return toISO(next); count++; } next.setDate(next.getDate() + 1); }
+          return null;
+        }
+        const days = rv.split(",").map(Number).filter(n => !isNaN(n)).sort((a,b)=>a-b);
+        if (days.length === 0) return null;
+        const cur = new Date(base); cur.setDate(cur.getDate() + 1);
+        for (let i = 0; i < 14; i++) { if (days.includes(cur.getDay())) return toISO(cur); cur.setDate(cur.getDate() + 1); }
+      }
+      return null;
+    }
+
+    function repeatLabel(repeatType, repeatValue) {
+      if (!repeatType) return null;
+      if (repeatType === "weekly") return "毎週";
+      if (repeatType === "monthly") return "毎月";
+      if (repeatType === "custom") {
+        const rv = repeatValue || "";
+        if (rv.startsWith("ndays:")) return `${rv.split(":")[1]}日毎`;
+        if (rv.startsWith("nweeks:")) return `${rv.split(":")[1]}週毎`;
+        if (rv.startsWith("nmonths:")) return `${rv.split(":")[1]}ヶ月毎`;
+        if (rv.startsWith("nth:")) { const parts = rv.split(":"); return `第${parseInt(parts[1])+1}週の${WEEKDAYS[parseInt(parts[2])]}曜日`; }
+        const days = rv.split(",").map(Number).filter(n => !isNaN(n)).sort((a,b)=>a-b);
+        if (days.length > 0) return "毎週" + days.map(d => WEEKDAYS[d]).join("・");
+      }
+      return null;
+    }
+
+    function RepeatSelector({ repeatType, setRepeatType, repeatValue, setRepeatValue }) {
+      const [customMode, setCustomMode] = useState(() => {
+        if (!repeatValue) return "weekdays";
+        if (repeatValue.startsWith("ndays:")) return "ndays";
+        if (repeatValue.startsWith("nweeks:")) return "nweeks";
+        if (repeatValue.startsWith("nmonths:")) return "nmonths";
+        if (repeatValue.startsWith("nth:")) return "nth";
+        return "weekdays";
+      });
+      const [nDays, setNDays] = useState(() => repeatValue?.startsWith("ndays:") ? repeatValue.split(":")[1] : "3");
+      const [nWeeks, setNWeeks] = useState(() => repeatValue?.startsWith("nweeks:") ? repeatValue.split(":")[1] : "2");
+      const [nMonths, setNMonths] = useState(() => repeatValue?.startsWith("nmonths:") ? repeatValue.split(":")[1] : "2");
+      const [nthWeek, setNthWeek] = useState(() => repeatValue?.startsWith("nth:") ? repeatValue.split(":")[1] : "0");
+      const [nthDay, setNthDay] = useState(() => repeatValue?.startsWith("nth:") ? repeatValue.split(":")[2] : "1");
+      const [selDays, setSelDays] = useState(() => {
+        if (!repeatValue || repeatValue.startsWith("n") || repeatValue.startsWith("nth")) return [];
+        return repeatValue.split(",").map(Number).filter(n => !isNaN(n));
+      });
+
+      const updateValue = (mode, nd, nw, nm, ntw, ntd, sd) => {
+        if (repeatType !== "custom") return;
+        if (mode === "ndays") setRepeatValue("ndays:" + nd);
+        else if (mode === "nweeks") setRepeatValue("nweeks:" + nw);
+        else if (mode === "nmonths") setRepeatValue("nmonths:" + nm);
+        else if (mode === "nth") setRepeatValue("nth:" + ntw + ":" + ntd);
+        else setRepeatValue(sd.join(","));
+      };
+
+      const handleCustomMode = (m) => { setCustomMode(m); updateValue(m, nDays, nWeeks, nMonths, nthWeek, nthDay, selDays); };
+      const inp = { border:"1px solid #ddd", borderRadius:6, padding:"4px 6px", fontSize:12, outline:"none", width:48, textAlign:"center" };
+      const sel = { border:"1px solid #ddd", borderRadius:6, padding:"4px 6px", fontSize:12, outline:"none", background:"#fff" };
+
+      return (
+        <div>
+          <div style={{ fontSize:11, color:"#aaa", marginBottom:6 }}>繰り返し</div>
+          <select value={repeatType} onChange={e => { setRepeatType(e.target.value); setRepeatValue(""); }} style={{ ...sel, width:"100%", marginBottom:8 }}>
+            <option value="">なし</option>
+            <option value="weekly">毎週</option>
+            <option value="monthly">毎月</option>
+            <option value="custom">カスタム</option>
+          </select>
+          {repeatType === "custom" && (
+            <div style={{ background:"#f9f9f9", borderRadius:8, padding:"10px 10px 8px" }}>
+              <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:10 }}>
+                {[["weekdays","曜日指定"],["ndays","◯日毎"],["nweeks","◯週毎"],["nmonths","◯ヶ月毎"],["nth","第◯週"]].map(([m,l]) => (
+                  <button key={m} onClick={() => handleCustomMode(m)}
+                    style={{ padding:"3px 8px", borderRadius:20, border:`1px solid ${customMode===m?"#6366f1":"#ddd"}`, background:customMode===m?"#6366f118":"transparent", color:customMode===m?"#6366f1":"#666", fontSize:11, cursor:"pointer" }}>{l}</button>
+                ))}
+              </div>
+              {customMode === "weekdays" && (
+                <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                  {WEEKDAYS.map((d, i) => (
+                    <button key={i} onClick={() => { const nd = selDays.includes(i) ? selDays.filter(x=>x!==i) : [...selDays,i]; setSelDays(nd); updateValue("weekdays", nDays, nWeeks, nMonths, nthWeek, nthDay, nd); }}
+                      style={{ padding:"4px 8px", borderRadius:20, border:`1px solid ${selDays.includes(i)?"#6366f1":"#ddd"}`, background:selDays.includes(i)?"#6366f118":"transparent", color:selDays.includes(i)?"#6366f1":"#666", fontSize:11, cursor:"pointer" }}>{d}</button>
+                  ))}
+                </div>
+              )}
+              {customMode === "ndays" && (
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <input type="number" min="1" max="365" value={nDays} onChange={e => { setNDays(e.target.value); updateValue("ndays", e.target.value, nWeeks, nMonths, nthWeek, nthDay, selDays); }} style={inp} />
+                  <span style={{ fontSize:12, color:"#666" }}>日毎</span>
+                </div>
+              )}
+              {customMode === "nweeks" && (
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <input type="number" min="1" max="52" value={nWeeks} onChange={e => { setNWeeks(e.target.value); updateValue("nweeks", nDays, e.target.value, nMonths, nthWeek, nthDay, selDays); }} style={inp} />
+                  <span style={{ fontSize:12, color:"#666" }}>週毎</span>
+                </div>
+              )}
+              {customMode === "nmonths" && (
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                  <input type="number" min="1" max="12" value={nMonths} onChange={e => { setNMonths(e.target.value); updateValue("nmonths", nDays, nWeeks, e.target.value, nthWeek, nthDay, selDays); }} style={inp} />
+                  <span style={{ fontSize:12, color:"#666" }}>ヶ月毎</span>
+                </div>
+              )}
+              {customMode === "nth" && (
+                <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                  <select value={nthWeek} onChange={e => { setNthWeek(e.target.value); updateValue("nth", nDays, nWeeks, nMonths, e.target.value, nthDay, selDays); }} style={sel}>
+                    {NTH_LABELS.map((l,i) => <option key={i} value={i}>{l}週</option>)}
+                  </select>
+                  <span style={{ fontSize:12, color:"#666" }}>の</span>
+                  <select value={nthDay} onChange={e => { setNthDay(e.target.value); updateValue("nth", nDays, nWeeks, nMonths, nthWeek, e.target.value, selDays); }} style={sel}>
+                    {WEEKDAYS.map((d,i) => <option key={i} value={i}>{d}曜日</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function App() {
+      const [projects, setProjects] = useState([]);
+      const [tasks, setTasks]       = useState([]);
+      const [loading, setLoading]   = useState(true);
+      const [selProj, setSelProj]   = useState(null);
+      const [newTask, setNewTask]   = useState("");
+      const [newDeadline, setNewDeadline] = useState("");
+      const [newRepeat, setNewRepeat] = useState({ repeat_type:"", repeat_value:"" });
+      const [newProjName, setNewProjName] = useState("");
+      const [addingProj, setAddingProj] = useState(false);
+      const [showRepeatInput, setShowRepeatInput] = useState(false);
+      const [filter, setFilter]     = useState("active");
+      const [dismissed, setDismissed] = useState({});
+      const [reordering, setReordering] = useState(false);
+      const [sidebarOpen, setSidebarOpen] = useState(false);
+      const [confirmTask, setConfirmTask] = useState(null);
+      const [editTask, setEditTask]   = useState(null);
+      const [imageUploading, setImageUploading] = useState(false);
+      const [showReminders, setShowReminders] = useState(true);
+      const [calendarView, setCalendarView] = useState(false);
+
+      useEffect(() => {
+        (async () => {
+          const { data: ps } = await sb.from("projects").select("*").order("position");
+          const { data: ts } = await sb.from("tasks").select("*").order("created_at");
+          setProjects(ps || []); setTasks(ts || []); setLoading(false);
+        })();
+        const projSub = sb.channel("projects-ch").on("postgres_changes", { event: "*", schema: "public", table: "projects" }, () => {
+          sb.from("projects").select("*").order("position").then(({ data }) => setProjects(data || []));
+        }).subscribe();
+        const taskSub = sb.channel("tasks-ch").on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => {
+          sb.from("tasks").select("*").order("created_at").then(({ data }) => setTasks(data || []));
+        }).subscribe();
+        return () => { sb.removeChannel(projSub); sb.removeChannel(taskSub); };
+      }, []);
+
+      const addProject = async () => {
+        if (!newProjName.trim()) return;
+        const color = COLORS[projects.length % COLORS.length];
+        const { data } = await sb.from("projects").insert({ id: uid(), name: newProjName.trim(), color, position: projects.length }).select().single();
+        if (data) setProjects(p => [...p, data]);
+        setNewProjName(""); setAddingProj(false);
+      };
+
+      const deleteProject = async (pid) => {
+        if (!confirm("プロジェクトとタスクを削除しますか？")) return;
+        await sb.from("projects").delete().eq("id", pid);
+        setProjects(p => p.filter(x => x.id !== pid)); setTasks(t => t.filter(x => x.project_id !== pid));
+        if (selProj === pid) setSelProj(null);
+      };
+
+      const moveProject = async (pid, dir) => {
+        const idx = projects.findIndex(p => p.id === pid); const jdx = idx + dir;
+        if (jdx < 0 || jdx >= projects.length) return;
+        const next = [...projects]; [next[idx], next[jdx]] = [next[jdx], next[idx]];
+        setProjects(next);
+        await sb.from("projects").update({ position: idx }).eq("id", next[idx].id);
+        await sb.from("projects").update({ position: jdx }).eq("id", next[jdx].id);
+      };
+
+      const addTask = async () => {
+        if (!newTask.trim() || !selProj) return;
+        const { data } = await sb.from("tasks").insert({ id: uid(), title: newTask.trim(), project_id: selProj, deadline: newDeadline || null, done: false, repeat_type: newRepeat.repeat_type || null, repeat_value: newRepeat.repeat_value || null }).select().single();
+        if (data) setTasks(t => [...t, data]);
+        setNewTask(""); setNewDeadline(""); setNewRepeat({ repeat_type:"", repeat_value:"" }); setShowRepeatInput(false);
+      };
+
+      const handleCheck = (task) => { if (!task.done) setConfirmTask({ ...task, type: "done" }); else updateTask(task.id, { done: false }); };
+
+      const confirmAction = async () => {
+        if (!confirmTask) return;
+        if (confirmTask.type === "done") {
+          if (confirmTask.repeat_type) { const next = nextDeadline(confirmTask.deadline, confirmTask.repeat_type, confirmTask.repeat_value); await updateTask(confirmTask.id, { deadline: next, done: false }); }
+          else await updateTask(confirmTask.id, { done: true });
+        } else if (confirmTask.type === "delete") {
+          await sb.from("tasks").delete().eq("id", confirmTask.id);
+          setTasks(t => t.filter(x => x.id !== confirmTask.id));
+        }
+        setConfirmTask(null);
+      };
+
+      const updateTask = async (id, fields) => { await sb.from("tasks").update(fields).eq("id", id); setTasks(t => t.map(x => x.id === id ? { ...x, ...fields } : x)); };
+      const deleteTask = (task) => setConfirmTask({ ...task, type: "delete" });
+      const openEdit = (task) => setEditTask({ id: task.id, title: task.title, deadline: task.deadline || "", repeat_type: task.repeat_type || "", repeat_value: task.repeat_value || "", image_url: task.image_url || null, project_id: task.project_id, note: task.note || "", priority: task.priority || 0 });
+      const saveEdit = async () => {
+        if (!editTask || !editTask.title.trim()) return;
+        await updateTask(editTask.id, { title: editTask.title.trim(), deadline: editTask.deadline || null, repeat_type: editTask.repeat_type || null, repeat_value: editTask.repeat_value || null, project_id: editTask.project_id, note: editTask.note || null, priority: editTask.priority || 0 });
+        setEditTask(null);
+      };
+
+      const uploadImage = async (file, taskId) => {
+        if (!file) return null;
+        const ext = file.name.split(".").pop();
+        const path = `${taskId}/${uid()}.${ext}`;
+        const { error } = await sb.storage.from("attachments").upload(path, file, { upsert: true });
+        if (error) { alert("アップロードに失敗しました"); return null; }
+        const { data } = sb.storage.from("attachments").getPublicUrl(path);
+        return data.publicUrl;
+      };
+
+      const handleImageUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file || !editTask) return;
+        setImageUploading(true);
+        const url = await uploadImage(file, editTask.id);
+        if (url) { await updateTask(editTask.id, { image_url: url }); setEditTask(t => ({...t, image_url: url})); }
+        setImageUploading(false);
+      };
+
+      const removeImage = async () => {
+        if (!editTask) return;
+        await updateTask(editTask.id, { image_url: null });
+        setEditTask(t => ({...t, image_url: null}));
+      };
+
+      const visibleTasks = tasks.filter(t => {
+        if (selProj && t.project_id !== selProj) return false;
+        if (filter === "active" && t.done) return false;
+        if (filter === "done" && !t.done) return false;
+        return true;
+      }).sort((a, b) => { const da = diffDays(a.deadline) ?? 9999; const db = diffDays(b.deadline) ?? 9999; return da - db || new Date(a.created_at) - new Date(b.created_at); });
+
+      const proj = (pid) => projects.find(p => p.id === pid);
+      const reminders = tasks.filter(t => { if (t.done || dismissed[t.id]) return false; return (t.priority || 0) > 0; }).sort((a, b) => (b.priority||0) - (a.priority||0) || diffDays(a.deadline) - diffDays(b.deadline));
+
+      function reminderLabel(diff) { if (diff < 0) return `${Math.abs(diff)}日超過`; if (diff === 0) return "今日が期限"; if (diff === 1) return "明日が期限"; return `あと${diff}日`; }
+      function reminderColor(diff) {
+        if (diff <= 0) return { bg:"#fff5f5", border:"#fecaca", dot:"#ef4444", text:"#ef4444" };
+        if (diff <= 1) return { bg:"#fff7ed", border:"#fed7aa", dot:"#f97316", text:"#f97316" };
+        return { bg:"#fffbeb", border:"#fde68a", dot:"#f59e0b", text:"#f59e0b" };
+      }
+
+      const currentProj = selProj ? proj(selProj) : null;
+
+      const sidebarContent = (
+        <>
+          <div style={{ padding:"0 12px 10px", fontWeight:700, fontSize:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span>Todo</span>{loading && <span style={{ fontSize:10, color:"#bbb" }}>同期中…</span>}
+          </div>
+          <SideItem label="すべて" count={tasks.filter(t=>!t.done).length} active={selProj===null && !reordering} onClick={() => { setSelProj(null); setReordering(false); setSidebarOpen(false); }} />
+          <div style={{ padding:"10px 12px 4px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <span style={{ fontSize:10, color:"#bbb", letterSpacing:.5, textTransform:"uppercase" }}>Projects</span>
+            <button onClick={() => setReordering(r => !r)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:10, color: reordering ? "#6366f1" : "#bbb", padding:0 }}>{reordering ? "完了" : "並替"}</button>
+          </div>
+          {projects.map((p, i) => reordering ? (
+            <div key={p.id} style={{ display:"flex", alignItems:"center", gap:4, padding:"5px 8px 5px 12px", background:"#fafafa", borderBottom:"1px solid #f0f0f0" }}>
+              <span style={{ width:6, height:6, borderRadius:"50%", background:p.color, flexShrink:0 }} />
+              <span style={{ flex:1, fontSize:11, color:"#444", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{p.name}</span>
+              <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                <button onClick={() => moveProject(p.id, -1)} disabled={i===0} style={{ background:"none", border:"none", cursor:i===0?"default":"pointer", color:i===0?"#ddd":"#888", fontSize:10, padding:"1px 3px", lineHeight:1 }}>▲</button>
+                <button onClick={() => moveProject(p.id, 1)} disabled={i===projects.length-1} style={{ background:"none", border:"none", cursor:i===projects.length-1?"default":"pointer", color:i===projects.length-1?"#ddd":"#888", fontSize:10, padding:"1px 3px", lineHeight:1 }}>▼</button>
+              </div>
+            </div>
+          ) : (
+            <SideItem key={p.id} label={p.name} count={tasks.filter(t=>t.project_id===p.id&&!t.done).length} active={selProj===p.id} color={p.color} onClick={() => { setSelProj(p.id); setSidebarOpen(false); }} onDelete={() => deleteProject(p.id)} />
+          ))}
+          <div style={{ padding:"6px 12px 0" }}>
+            {addingProj ? (
+              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                <input autoFocus value={newProjName} onChange={e=>setNewProjName(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") addProject(); if(e.key==="Escape") setAddingProj(false); }} placeholder="名前を入力" style={{ border:"1px solid #ddd", borderRadius:5, padding:"4px 7px", fontSize:11, outline:"none", width:"100%", boxSizing:"border-box" }} />
+                <div style={{ display:"flex", gap:4 }}>
+                  <button onClick={addProject} style={{ flex:1, background:"#1a1a1a", color:"#fff", border:"none", borderRadius:5, padding:"4px 0", cursor:"pointer", fontSize:11 }}>追加</button>
+                  <button onClick={()=>setAddingProj(false)} style={{ flex:1, background:"#f0f0f0", color:"#888", border:"none", borderRadius:5, padding:"4px 0", cursor:"pointer", fontSize:11 }}>×</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setAddingProj(true)} style={{ background:"none", border:"none", cursor:"pointer", color:"#bbb", fontSize:11, padding:"2px 0", display:"flex", alignItems:"center", gap:4 }}><span>+</span> 追加</button>
+            )}
+          </div>
+        </>
+      );
+
+      return (
+        <div style={{ display:"flex", flexDirection:"column", height:"100vh", fontFamily:"'Helvetica Neue',Arial,'Hiragino Sans',sans-serif", background:"#f5f5f5", color:"#1a1a1a", fontSize:12 }}>
+
+          {/* リマインドバナー */}
+          {reminders.length > 0 && (
+            <div style={{ background:"#fff", borderBottom:"1px solid #e8e8e8", padding:"6px 12px", display:"flex", flexWrap:"wrap", gap:6, alignItems:"center" }}>
+              <span onClick={() => setShowReminders(r=>!r)} style={{ fontSize:10, color:"#bbb", marginRight:2, flexShrink:0, cursor:"pointer", userSelect:"none" }}>
+                ⏰ {showReminders ? "▲" : "▼"}
+              </span>
+              {showReminders && reminders.map(t => {
+                const diff = diffDays(t.deadline);
+                const c = diff !== null ? reminderColor(diff) : { bg:"#f9f9f9", border:"#e8e8e8", dot:"#ccc", text:"#ccc" };
+                const p = proj(t.project_id);
+                return (
+                  <div key={t.id} style={{ display:"flex", alignItems:"center", gap:5, background:c.bg, border:`1px solid ${c.border}`, borderRadius:6, padding:"3px 8px 3px 6px", fontSize:11 }}>
+                    <span style={{ width:5, height:5, borderRadius:"50%", background:c.dot, flexShrink:0 }} />
+                    {p && <span style={{ color:p.color, fontSize:10 }}>{p.name}・</span>}
+                    {t.priority > 0 && <span style={{ fontSize:9, fontWeight:700, color:t.priority===3?"#ef4444":t.priority===2?"#f97316":"#10b981", background:t.priority===3?"#fef2f2":t.priority===2?"#fff7ed":"#f0fdf4", border:`1px solid ${t.priority===3?"#fecaca":t.priority===2?"#fed7aa":"#bbf7d0"}`, borderRadius:4, padding:"1px 5px", flexShrink:0 }}>{t.priority===3?"高":t.priority===2?"中":"低"}</span>}
+                    <span style={{ color:"#444" }}>{t.title}</span>
+                    <button onClick={() => handleCheck(t)} style={{ background:"none", border:"none", cursor:"pointer", color:c.text, fontSize:11, padding:"0 4px", lineHeight:1, fontWeight:600, flexShrink:0 }}>完了</button>
+                    <button onClick={() => setDismissed(d => ({...d, [t.id]:true}))} style={{ background:"none", border:"none", cursor:"pointer", color:"#ccc", fontSize:12, padding:"0 0 0 2px", lineHeight:1, flexShrink:0 }}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display:"flex", flex:1, overflow:"hidden", position:"relative" }}>
+            {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+            <div className={`sidebar${sidebarOpen ? " open" : ""}`}>{sidebarContent}</div>
+
+            <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+              <div style={{ padding:"10px 12px 0", borderBottom:"1px solid #e8e8e8", background:"#fff" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                  <button className="menu-btn" onClick={() => setSidebarOpen(true)} style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, padding:"0 4px 0 0", lineHeight:1, color:"#888" }}>☰</button>
+                  {currentProj && <span style={{ width:8, height:8, borderRadius:"50%", background:currentProj.color, display:"inline-block", flexShrink:0 }} />}
+                  <span style={{ fontSize:14, fontWeight:700, letterSpacing:-.3, flex:1 }}>{currentProj ? currentProj.name : "すべてのタスク"}</span>
+                  <span style={{ fontSize:11, color:"#bbb" }}>{tasks.filter(t => selProj ? t.project_id===selProj && !t.done : !t.done).length} 件</span>
+                  <button onClick={() => setCalendarView(v=>!v)} style={{ background:calendarView?"#6366f118":"none", border:`1px solid ${calendarView?"#6366f1":"transparent"}`, borderRadius:6, cursor:"pointer", color:calendarView?"#6366f1":"#bbb", fontSize:12, padding:"2px 7px", lineHeight:1, flexShrink:0 }}>📅</button>
+                  <button onClick={() => window.location.reload()} style={{ background:"none", border:"none", cursor:"pointer", color:"#bbb", fontSize:15, padding:"0 2px", lineHeight:1, flexShrink:0 }}>↻</button>
+                </div>
+                <div style={{ display:"flex" }}>
+                  {[["active","未完了"],["done","完了"],["all","すべて"]].map(([v,l]) => (
+                    <button key={v} onClick={() => setFilter(v)} style={{ background:"none", border:"none", borderBottom:`2px solid ${filter===v?"#1a1a1a":"transparent"}`, padding:"5px 10px", cursor:"pointer", fontSize:11, color:filter===v?"#1a1a1a":"#aaa", fontWeight:filter===v?600:400 }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ padding:"8px 12px", background:"#fff", borderBottom:"1px solid #e8e8e8" }}>
+                <div style={{ display:"flex", gap:6, marginBottom: showRepeatInput ? 8 : 0 }}>
+                  {!selProj && (
+                    <select value="" onChange={e => { if(e.target.value) setSelProj(e.target.value); }} style={{ border:"1px solid #ddd", borderRadius:6, padding:"5px 6px", fontSize:11, color:"#666", background:"#fff", cursor:"pointer", outline:"none", maxWidth:90 }}>
+                      <option value="">プロジェクト▾</option>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  )}
+                  <input value={newTask} onChange={e=>setNewTask(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()} placeholder={selProj ? "タスクを入力..." : "プロジェクトを選択"} disabled={!selProj} style={{ flex:1, border:"1px solid #ddd", borderRadius:6, padding:"5px 8px", fontSize:11, outline:"none", background:selProj?"#fff":"#fafafa", minWidth:0 }} />
+                  <input type="date" value={newDeadline} onChange={e=>setNewDeadline(e.target.value)} disabled={!selProj} style={{ border:"1px solid #ddd", borderRadius:6, padding:"5px 6px", fontSize:11, outline:"none", color:"#666", background:selProj?"#fff":"#fafafa", width:36, opacity:selProj?1:0.4 }} />
+                  <button onClick={() => setShowRepeatInput(r=>!r)} disabled={!selProj} style={{ border:`1px solid ${showRepeatInput?"#6366f1":"#ddd"}`, borderRadius:6, padding:"5px 7px", fontSize:12, cursor:"pointer", background:showRepeatInput?"#6366f118":"transparent", color:showRepeatInput?"#6366f1":"#aaa", opacity:selProj?1:0.4 }}>🔁</button>
+                  <button onClick={addTask} disabled={!selProj||!newTask.trim()} style={{ background:selProj&&newTask.trim()?"#1a1a1a":"#e8e8e8", color:selProj&&newTask.trim()?"#fff":"#bbb", border:"none", borderRadius:6, padding:"5px 12px", cursor:selProj&&newTask.trim()?"pointer":"default", fontSize:11, fontWeight:600, flexShrink:0 }}>追加</button>
+                </div>
+                {showRepeatInput && selProj && (
+                  <RepeatSelector repeatType={newRepeat.repeat_type} setRepeatType={v => setNewRepeat(r => ({...r, repeat_type: v, repeat_value: ""}))} repeatValue={newRepeat.repeat_value} setRepeatValue={v => setNewRepeat(r => ({...r, repeat_value: v}))} />
+                )}
+              </div>
+
+              {calendarView ? (
+                <TwoWeekCalendar tasks={visibleTasks} proj={proj} onTaskClick={openEdit} />
+              ) : (
+              <div style={{ flex:1, overflowY:"auto", padding:"4px 12px 20px" }}>
+                {loading && <div style={{ textAlign:"center", padding:"50px 0", color:"#ddd", fontSize:11 }}>読み込み中...</div>}
+                {!loading && visibleTasks.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"50px 0", color:"#ddd" }}>
+                    <div style={{ fontSize:24, marginBottom:8 }}>✓</div>
+                    <div style={{ fontSize:11 }}>タスクがありません</div>
+                  </div>
+                )}
+                {visibleTasks.map(task => {
+                  const p = proj(task.project_id); const diff = diffDays(task.deadline);
+                  const overdue = diff !== null && diff < 0 && !task.done;
+                  const soon = diff !== null && diff >= 0 && diff <= 7 && !task.done;
+                  const rl = repeatLabel(task.repeat_type, task.repeat_value);
+                  return (
+                    <div key={task.id} onClick={() => openEdit(task)} style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:"1px solid #f0f0f0", opacity:task.done?0.45:1, cursor:"pointer" }}>
+                      <button onClick={e => { e.stopPropagation(); handleCheck(task); }} style={{ width:16, height:16, borderRadius:"50%", border:`1.5px solid ${task.done?"#10b981":"#ccc"}`, background:task.done?"#10b981":"transparent", cursor:"pointer", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>
+                        {task.done && <svg width="8" height="6" viewBox="0 0 10 8"><path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                      </button>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ textDecoration:task.done?"line-through":"none", color:task.done?"#bbb":"#1a1a1a", fontSize:13 }}>{task.title}</div>
+                        {rl && <div style={{ fontSize:10, color:"#6366f1", marginTop:1 }}>🔁 {rl}</div>}
+                        {task.note && <div style={{ fontSize:10, color:"#999", marginTop:2, whiteSpace:"pre-wrap" }}>{task.note}</div>}
+                        {task.priority > 0 && <span style={{ fontSize:9, fontWeight:600, color:task.priority===3?"#ef4444":task.priority===2?"#f97316":"#10b981", background:task.priority===3?"#fef2f2":task.priority===2?"#fff7ed":"#f0fdf4", border:`1px solid ${task.priority===3?"#fecaca":task.priority===2?"#fed7aa":"#bbf7d0"}`, borderRadius:4, padding:"1px 5px", marginTop:2, display:"inline-block" }}>{task.priority===3?"高":task.priority===2?"中":"低"}</span>}
+                        {task.image_url && <img src={task.image_url} alt="" style={{ width:32, height:32, objectFit:"cover", borderRadius:4, marginTop:3, cursor:"pointer" }} onClick={() => window.open(task.image_url, "_blank")} />}
+                      </div>
+                      {!selProj && p && <span style={{ fontSize:10, color:p.color, background:p.color+"18", padding:"1px 6px", borderRadius:20, flexShrink:0 }}>{p.name}</span>}
+                      {diff !== null && (
+                        <span style={{ fontSize:10, flexShrink:0, color:overdue?"#ef4444":diff<=3&&!task.done?"#f97316":soon?"#1a1a1a":"#ccc", fontWeight:overdue||soon?600:400 }}>
+                          {overdue?`${Math.abs(diff)}日超過`:diff===0?"今日":diff===1?"明日":`${diff}日後`}
+                        </span>
+                      )}
+                      <button onClick={e => { e.stopPropagation(); deleteTask(task); }} style={{ background:"none", border:"none", cursor:"pointer", color:"#ddd", fontSize:14, padding:"0 1px", lineHeight:1, flexShrink:0 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              )}
+            </div>
+          </div>
+
+          {/* 編集ダイアログ */}
+          {editTask && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setEditTask(null)}>
+              <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:300, maxHeight:"90vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
+                <div style={{ fontSize:13, fontWeight:600, color:"#1a1a1a", marginBottom:16 }}>タスクを編集</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  <div>
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:4 }}>タスク名</div>
+                    <input autoFocus value={editTask.title} onChange={e => setEditTask(t => ({...t, title: e.target.value}))} onKeyDown={e => e.key === "Enter" && saveEdit()} style={{ width:"100%", border:"1px solid #ddd", borderRadius:8, padding:"8px 10px", fontSize:13, outline:"none", boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:6 }}>重要度</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {[[0,"なし","#ccc"],[1,"低","#10b981"],[2,"中","#f97316"],[3,"高","#ef4444"]].map(([val,label,color]) => (
+                        <button key={val} onClick={() => setEditTask(t => ({...t, priority: val}))}
+                          style={{ flex:1, padding:"6px 0", borderRadius:8, border:`1.5px solid ${editTask.priority===val?color:"#e8e8e8"}`, background:editTask.priority===val?color+"18":"transparent", color:editTask.priority===val?color:"#aaa", fontSize:11, cursor:"pointer", fontWeight:editTask.priority===val?600:400 }}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:4 }}>プロジェクト</div>
+                    <select value={editTask.project_id || ""} onChange={e => setEditTask(t => ({...t, project_id: e.target.value}))}
+                      style={{ width:"100%", border:"1px solid #ddd", borderRadius:8, padding:"8px 10px", fontSize:13, outline:"none", color:"#666", boxSizing:"border-box", background:"#fff" }}>
+                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:4 }}>期限</div>
+                    <input type="date" value={editTask.deadline} onChange={e => setEditTask(t => ({...t, deadline: e.target.value}))} style={{ width:"100%", border:"1px solid #ddd", borderRadius:8, padding:"8px 10px", fontSize:13, outline:"none", color:"#666", boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:4 }}>メモ</div>
+                    <textarea value={editTask.note} onChange={e => setEditTask(t => ({...t, note: e.target.value}))}
+                      placeholder="メモを入力..." rows={3}
+                      style={{ width:"100%", border:"1px solid #ddd", borderRadius:8, padding:"8px 10px", fontSize:12, outline:"none", boxSizing:"border-box", resize:"vertical", fontFamily:"inherit", color:"#444" }} />
+                  </div>
+                  <RepeatSelector repeatType={editTask.repeat_type} setRepeatType={v => setEditTask(t => ({...t, repeat_type: v, repeat_value: ""}))} repeatValue={editTask.repeat_value} setRepeatValue={v => setEditTask(t => ({...t, repeat_value: v}))} />
+                  <div>
+                    <div style={{ fontSize:11, color:"#aaa", marginBottom:6 }}>画像</div>
+                    {editTask.image_url ? (
+                      <div style={{ position:"relative", display:"inline-block", width:"100%" }}>
+                        <img src={editTask.image_url} alt="" style={{ width:"100%", borderRadius:8, maxHeight:160, objectFit:"cover", cursor:"pointer" }} onClick={() => window.open(editTask.image_url, "_blank")} />
+                        <button onClick={removeImage} style={{ position:"absolute", top:4, right:4, background:"rgba(0,0,0,0.5)", border:"none", borderRadius:"50%", width:22, height:22, color:"#fff", fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
+                      </div>
+                    ) : (
+                      <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, border:"1px dashed #ddd", borderRadius:8, padding:"12px", cursor:"pointer", color:"#aaa", fontSize:12 }}>
+                        {imageUploading ? "アップロード中..." : "📷 画像を追加"}
+                        <input type="file" accept="image/*" style={{ display:"none" }} onChange={handleImageUpload} disabled={imageUploading} />
+                      </label>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display:"flex", gap:8, marginTop:20 }}>
+                  <button onClick={() => setEditTask(null)} style={{ flex:1, background:"#f0f0f0", border:"none", borderRadius:8, padding:"10px 0", fontSize:12, cursor:"pointer", color:"#666" }}>キャンセル</button>
+                  <button onClick={saveEdit} style={{ flex:1, background:"#1a1a1a", border:"none", borderRadius:8, padding:"10px 0", fontSize:12, cursor:"pointer", color:"#fff", fontWeight:600 }}>保存</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 完了・削除確認ダイアログ */}
+          {confirmTask && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setConfirmTask(null)}>
+              <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:260, textAlign:"center" }} onClick={e => e.stopPropagation()}>
+                {confirmTask.type === "done"
+                  ? <div style={{ fontSize:13, fontWeight:600, color:"#1a1a1a", marginBottom:6 }}>{confirmTask.repeat_type ? "完了して次の期限へ？" : "完了にしますか？"}</div>
+                  : <div style={{ fontSize:13, fontWeight:600, color:"#ef4444", marginBottom:6 }}>削除しますか？</div>}
+                <div style={{ fontSize:12, color:"#888", marginBottom:4, lineHeight:1.5 }}>{confirmTask.title}</div>
+                {confirmTask.type === "done" && confirmTask.repeat_type && (
+                  <div style={{ fontSize:11, color:"#6366f1", marginBottom:12 }}>🔁 次の期限: {nextDeadline(confirmTask.deadline, confirmTask.repeat_type, confirmTask.repeat_value) || "—"}</div>
+                )}
+                <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                  <button onClick={() => setConfirmTask(null)} style={{ flex:1, background:"#f0f0f0", border:"none", borderRadius:8, padding:"10px 0", fontSize:12, cursor:"pointer", color:"#666" }}>キャンセル</button>
+                  <button onClick={confirmAction} style={{ flex:1, background: confirmTask.type === "done" ? "#1a1a1a" : "#ef4444", border:"none", borderRadius:8, padding:"10px 0", fontSize:12, cursor:"pointer", color:"#fff", fontWeight:600 }}>
+                    {confirmTask.type === "done" ? (confirmTask.repeat_type ? "完了・更新" : "完了") : "削除"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+
+    function TwoWeekCalendar({ tasks, proj, onTaskClick }) {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const days = [];
+      for (let i = 0; i < 14; i++) {
+        const d = new Date(today); d.setDate(today.getDate() + i);
+        days.push(d);
+      }
+      const WDAYS = ["日","月","火","水","木","金","土"];
+      return (
+        <div style={{ flex:1, overflowY:"auto", padding:"8px 12px 20px" }}>
+          {days.map((day, i) => {
+            const iso = day.toISOString().slice(0,10);
+            const dayTasks = tasks.filter(t => t.deadline === iso);
+            const isToday = i === 0;
+            const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+            return (
+              <div key={iso} style={{ marginBottom:8 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:4 }}>
+                  <div style={{ width:32, height:32, borderRadius:"50%", background:isToday?"#1a1a1a":"transparent", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                    <span style={{ fontSize:9, color:isToday?"#fff":isWeekend?"#ef4444":"#bbb", lineHeight:1 }}>{WDAYS[day.getDay()]}</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:isToday?"#fff":isWeekend?"#ef4444":"#1a1a1a", lineHeight:1.2 }}>{day.getDate()}</span>
+                  </div>
+                  {dayTasks.length === 0 && <span style={{ fontSize:11, color:"#e0e0e0" }}>タスクなし</span>}
+                  <div style={{ flex:1, display:"flex", flexDirection:"column", gap:4 }}>
+                    {dayTasks.map(task => {
+                      const p = proj(task.project_id);
+                      const priColor = task.priority===3?"#ef4444":task.priority===2?"#f97316":task.priority===1?"#10b981":null;
+                      return (
+                        <div key={task.id} onClick={() => onTaskClick(task)}
+                          style={{ display:"flex", alignItems:"center", gap:6, background:"#f9f9f9", borderRadius:8, padding:"6px 10px", cursor:"pointer", opacity:task.done?0.4:1, borderLeft:`3px solid ${priColor||"#e0e0e0"}` }}>
+                          {p && <span style={{ fontSize:10, color:p.color, background:p.color+"18", padding:"1px 5px", borderRadius:20, flexShrink:0 }}>{p.name}</span>}
+                          <span style={{ fontSize:12, flex:1, textDecoration:task.done?"line-through":"none", color:task.done?"#bbb":"#1a1a1a" }}>{task.title}</span>
+                          {task.priority > 0 && <span style={{ fontSize:9, fontWeight:700, color:priColor, flexShrink:0 }}>{task.priority===3?"高":task.priority===2?"中":"低"}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {i < 13 && <div style={{ height:1, background:"#f0f0f0", marginLeft:38 }} />}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function SideItem({ label, count, active, color, onClick, onDelete }) {
+      const [hover, setHover] = useState(false);
+      return (
+        <div onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+          style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 12px", cursor:"pointer", background:active?"#f5f5f5":"transparent", borderRight:`2px solid ${active?"#1a1a1a":"transparent"}` }}
+          onClick={onClick}>
+          {color && <span style={{ width:6, height:6, borderRadius:"50%", background:color, flexShrink:0 }} />}
+          <span style={{ flex:1, fontSize:12, color:active?"#1a1a1a":"#666", fontWeight:active?600:400, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{label}</span>
+          {count > 0 && <span style={{ fontSize:10, color:"#bbb" }}>{count}</span>}
+          {onDelete && hover && (
+            <button onClick={e=>{e.stopPropagation();onDelete();}} style={{ background:"none", border:"none", cursor:"pointer", color:"#ccc", fontSize:12, padding:0, lineHeight:1 }}>×</button>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
