@@ -56,8 +56,8 @@
     const COLORS = ["#6366f1","#ec4899","#f97316","#10b981","#3b82f6","#8b5cf6","#ef4444","#14b8a6"];
     const WEEKDAYS = ["日","月","火","水","木","金","土"];
     const NTH_LABELS = ["第1","第2","第3","第4","第5"];
- 
- 
+
+
     const HOLIDAYS = {
       "2025-01-01":"元日","2025-01-13":"成人の日","2025-02-11":"建国記念の日",
       "2025-02-23":"天皇誕生日","2025-02-24":"天皇誕生日 振替","2025-03-20":"春分の日",
@@ -81,13 +81,13 @@
     }
     function toISO(d) { return d.toISOString().slice(0,10); }
     function todayISO() { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; }
- 
+
     function nextDeadline(deadline, repeatType, repeatValue) {
       if (!deadline || !repeatType) return null;
       // 今日の翌日を起点にして次の期限を探す（完了日ではなく今日基準）
       const today = new Date(); today.setHours(0,0,0,0);
       const base = new Date(deadline + "T00:00:00");
- 
+
       if (repeatType === "weekly") {
         // 最初の期限の曜日を維持したまま、今日以降の次の同曜日へ
         const targetDay = base.getDay();
@@ -134,7 +134,7 @@
       }
       return null;
     }
- 
+
     function repeatLabel(repeatType, repeatValue) {
       if (!repeatType) return null;
       if (repeatType === "weekly") return "毎週";
@@ -150,7 +150,7 @@
       }
       return null;
     }
- 
+
     function RepeatSelector({ repeatType, setRepeatType, repeatValue, setRepeatValue }) {
       const [customMode, setCustomMode] = useState(() => {
         if (!repeatValue) return "weekdays";
@@ -238,7 +238,7 @@
         </div>
       );
     }
- 
+
     function App() {
       const [projects, setProjects] = useState([]);
       const [tasks, setTasks] = useState([]);
@@ -258,7 +258,7 @@
       const [eventEdit, setEventEdit] = useState(null);
       const [imageUploading, setImageUploading] = useState(false);
       const [showReminders, setShowReminders] = useState(true);
- 
+
       const [overdueModal, setOverdueModal] = useState(null);
       const [taskMenu, setTaskMenu] = useState(null);
       const [showAddMenu, setShowAddMenu] = useState(false);
@@ -269,7 +269,7 @@
       const [newProjInDialogName, setNewProjInDialogName] = useState("");
       const [viewMode, setViewMode] = useState("calendar");
       const [movingProjId, setMovingProjId] = useState(null); // "calendar" | "list" | "calonly"
- 
+
       useEffect(() => {
         (async () => {
           const { data: ps } = await sb.from("projects").select("*").order("position");
@@ -312,7 +312,7 @@
         document.addEventListener("visibilitychange", handleVisibility);
         return () => { stopSubs(); document.removeEventListener("visibilitychange", handleVisibility); };
       }, []);
- 
+
       const addProject = async () => {
         if (!newProjName.trim()) return;
         const color = COLORS[projects.length % COLORS.length];
@@ -376,7 +376,7 @@
         setNewProjInDialogName("");
         setNewProjInDialog(false);
       };
- 
+
       const saveEvent = async () => {
         if (!eventEdit || !eventEdit.title.trim() || !eventEdit.date) return;
         if (eventEdit.id === null) {
@@ -414,26 +414,26 @@
         await updateTask(editTask.id, { image_url: null });
         setEditTask(t => ({...t, image_url: null}));
       };
- 
+
       const visibleTasks = tasks.filter(t => {
         if (selProj && t.project_id !== selProj) return false;
         if (filter === "active" && t.done) return false;
         if (filter === "done" && !t.done) return false;
         return true;
       }).sort((a, b) => { const da = diffDays(a.deadline) ?? 9999; const db = diffDays(b.deadline) ?? 9999; return da - db || new Date(a.created_at) - new Date(b.created_at); });
- 
+
       const proj = (pid) => projects.find(p => p.id === pid);
       const reminders = tasks.filter(t => { if (t.done || dismissed[t.id]) return false; return (t.priority || 0) > 0; }).sort((a, b) => (b.priority||0) - (a.priority||0) || diffDays(a.deadline) - diffDays(b.deadline));
- 
+
       function reminderColor(diff) {
         if (diff === null || diff > 3) return { bg:"#fffbeb", border:"#fde68a", dot:"#f59e0b", text:"#f59e0b" };
         if (diff <= 0) return { bg:"#fff5f5", border:"#fecaca", dot:"#ef4444", text:"#ef4444" };
         if (diff <= 1) return { bg:"#fff7ed", border:"#fed7aa", dot:"#f97316", text:"#f97316" };
         return { bg:"#fffbeb", border:"#fde68a", dot:"#f59e0b", text:"#f59e0b" };
       }
- 
+
       const currentProj = selProj ? proj(selProj) : null;
- 
+
       const sidebarContent = (
         <>
           <div style={{ padding:"0 12px 10px", fontWeight:700, fontSize:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -504,7 +504,7 @@
           </div>
         </>
       );
- 
+
       return (
         <div id="app-wrapper">
         <div style={{ display:"flex", flexDirection:"column", height:"100vh", fontFamily:"'Helvetica Neue',Arial,'Hiragino Sans',sans-serif", background:"#f5f5f5", color:"#1a1a1a", fontSize:12 }}>
@@ -546,7 +546,7 @@
               </div>
             );
           })()}
- 
+
           <div style={{ display:"flex", flex:1, overflow:"hidden", position:"relative" }}>
             {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
             <div className={`sidebar${sidebarOpen ? " open" : ""}`}>{sidebarContent}</div>
@@ -576,7 +576,7 @@
                 </div>
                 {reminders.length > 0 && <button onClick={() => setShowReminders(r=>!r)} style={{ background:"none", border:"none", cursor:"pointer", color:showReminders?"#6366f1":"#bbb", fontSize:14, padding:"0 2px", lineHeight:1, flexShrink:0 }}>{showReminders ? "🔔" : "🔕"}</button>}
               </div>
- 
+
               {viewMode === "calonly" && (
                 <TwoWeekCalendar tasks={[]} events={events} proj={proj} onTaskClick={(t) => setTaskMenu(t)} onOverdueClick={(t) => setOverdueModal(t)} onEventClick={(ev) => setEventEdit({...ev})} daysCount={90} pastDays={60} />
               )}
@@ -648,14 +648,14 @@
               })()}
             </div>
           </div>
- 
+
           <div style={{ position:"fixed", bottom:16, left:"50%", transform:"translateX(-50%)", display:"flex", gap:8, zIndex:50, alignItems:"center", background:"rgba(255,255,255,0.92)", borderRadius:40, padding:"8px 16px", boxShadow:"0 4px 20px rgba(0,0,0,0.12)", backdropFilter:"blur(8px)" }}>
             <button onClick={() => { if(calendarTodayRef.current) calendarTodayRef.current.scrollIntoView({behavior:"smooth",block:"start"}); }} style={{ width:36, height:36, borderRadius:"50%", background:"#f0f0f0", color:"#666", border:"none", fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }} title="今日へ">⬤</button>
             <button onClick={() => setEventEdit({ id: null, title: "", date: todayISO(), time: "", note: "" })} style={{ width:36, height:36, borderRadius:"50%", background:"#6366f1", color:"#fff", border:"none", fontSize:15, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 2px 8px rgba(99,102,241,0.4)" }}>📅</button>
             <button onClick={() => setEditTask({ id: null, title: "", deadline: todayISO(), repeat_type: "", repeat_value: "", image_url: null, project_id: selProj || (projects[0]?.id || ""), note: "", priority: 0 })} style={{ width:36, height:36, borderRadius:"50%", background:"#1a1a1a", color:"#fff", border:"none", fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 2px 8px rgba(0,0,0,0.2)" }}>＋</button>
             <button onClick={() => window.location.reload()} style={{ width:36, height:36, borderRadius:"50%", background:"#f0f0f0", color:"#666", border:"none", fontSize:16, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>↻</button>
           </div>
- 
+
           {taskMenu && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={() => setTaskMenu(null)}>
               <div style={{ background:"#fff", borderRadius:"14px 14px 0 0", padding:"20px", width:"100%", maxWidth:480 }} onClick={e => e.stopPropagation()}>
@@ -670,7 +670,7 @@
               </div>
             </div>
           )}
- 
+
           {overdueModal && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setOverdueModal(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"20px", width:300, maxHeight:"70vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
@@ -694,7 +694,7 @@
               </div>
             </div>
           )}
- 
+
           {eventEdit && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setEventEdit(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:300, maxHeight:"90vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
@@ -732,7 +732,7 @@
               </div>
             </div>
           )}
- 
+
           {editTask && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setEditTask(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:300, maxHeight:"90vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
@@ -802,7 +802,7 @@
               </div>
             </div>
           )}
- 
+
           {confirmTask && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setConfirmTask(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:260, textAlign:"center" }} onClick={e => e.stopPropagation()}>
@@ -823,7 +823,7 @@
         </div>
       );
     }
- 
+
     function TwoWeekCalendar({ tasks, events, proj, onTaskClick, onOverdueClick, onEventClick, daysCount, pastDays }) {
       const { useEffect: ue, useRef, useLayoutEffect } = React;
       const todayRef = useRef(null);
@@ -904,7 +904,7 @@
         </div>
       );
     }
- 
+
     function SideItem({ label, count, active, color, onClick, onDelete }) {
       const [hover, setHover] = useState(false);
       return (
@@ -920,7 +920,7 @@
         </div>
       );
     }
- 
+
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
