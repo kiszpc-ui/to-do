@@ -845,7 +845,7 @@
       const todayRef = useRef(null);
       useLayoutEffect(() => {
         if (todayRef.current) {
-          setTimeout(() => { if(todayRef.current) todayRef.current.scrollIntoView({ block:"start" }); }, 100);
+          setTimeout(() => { if(todayRef.current) todayRef.current.scrollIntoView({ block:"start" }); }, 600);
         }
       }, []);
       const today = new Date();
@@ -871,7 +871,7 @@
             const allOverdue = isToday ? tasks.filter(t => { const dif = diffDays(t.deadline); return dif !== null && dif < 0 && !t.done; }) : [];
             const isEmpty = dayTasks.length === 0 && dayEvents.length === 0;
             return (
-              <div key={iso} ref={isToday ? todayRef : null} data-today={isToday ? "true" : undefined}>
+              <div key={iso} ref={isToday ? todayRef : null} id={isToday ? "today-anchor" : undefined}>
                 <div style={{ padding:"8px 0 6px" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
                     <div onClick={() => onEventClick({ id: null, title: "", date: iso, time: "", note: "" })} style={{ display:"inline-flex", alignItems:"center", gap:5, background:isToday?"#1a1a1a":"transparent", borderRadius:6, padding:isToday?"2px 10px":"2px 4px", cursor:"pointer" }}>
