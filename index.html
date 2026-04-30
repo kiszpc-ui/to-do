@@ -80,7 +80,7 @@
       return Math.ceil((d - t) / 86400000);
     }
     function toISO(d) { return d.toISOString().slice(0,10); }
-    function todayISO() { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; }
+    function todayISO() { const t = new Date(); const offset = t.getTimezoneOffset() * 60000; const local = new Date(t - offset); return local.toISOString().slice(0,10); }
  
     function nextDeadline(deadline, repeatType, repeatValue) {
       if (!deadline || !repeatType) return null;
@@ -586,7 +586,7 @@
               {viewMode === "list" && (() => {
                 const WDAYS2 = ["日","月","火","水","木","金","土"];
                 const today2 = new Date();
-                const todayStr2 = `${today2.getFullYear()}-${String(today2.getMonth()+1).padStart(2,'0')}-${String(today2.getDate()).padStart(2,'0')}`;
+                const todayStr2 = todayISO();
                 // 日付でグループ化
                 const noDeadline = visibleTasks.filter(t => !t.deadline);
                 const withDeadline = visibleTasks.filter(t => t.deadline);
@@ -849,7 +849,7 @@
         }
       }, []);
       const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      const todayStr = todayISO();
       const days = [];
       const start = pastDays || 0;
       const total = (pastDays || 0) + (daysCount || 14);
