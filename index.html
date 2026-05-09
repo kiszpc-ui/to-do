@@ -56,8 +56,8 @@
     const COLORS = ["#6366f1","#ec4899","#f97316","#10b981","#3b82f6","#8b5cf6","#ef4444","#14b8a6"];
     const WEEKDAYS = ["日","月","火","水","木","金","土"];
     const NTH_LABELS = ["第1","第2","第3","第4","第5"];
-
-
+ 
+ 
     const HOLIDAYS = {
       "2025-01-01":"元日","2025-01-13":"成人の日","2025-02-11":"建国記念の日",
       "2025-02-23":"天皇誕生日","2025-02-24":"天皇誕生日 振替","2025-03-20":"春分の日",
@@ -81,31 +81,30 @@
     }
     function toISO(d) { return d.toISOString().slice(0,10); }
     function todayISO() { const t = new Date(); const offset = t.getTimezoneOffset() * 60000; const local = new Date(t - offset); return local.toISOString().slice(0,10); }
-
+ 
     function nextDeadline(deadline, repeatType, repeatValue) {
       if (!deadline || !repeatType) return null;
       // 今日の翌日を起点にして次の期限を探す（完了日ではなく今日基準）
       const today = new Date(); today.setHours(0,0,0,0);
       const base = new Date(deadline + "T00:00:00");
-
+ 
       if (repeatType === "weekly") {
-        // 現在の期限から7日後（今日より前なら今日以降の直近の同曜日）
-        const next = new Date(base); next.setDate(base.getDate() + 7);
-        if (next > today) return toISO(next);
-        // 期限が過去の場合は今日以降の直近の同曜日
-        const targetDay = base.getDay();
-        const cur = new Date(today); cur.setDate(today.getDate() + 1);
-        for (let i = 0; i < 14; i++) { if (cur.getDay() === targetDay) return toISO(cur); cur.setDate(cur.getDate() + 1); }
-        return null;
+        // 期限から7日ずつ足して今日より後になるまで進める
+        const next = new Date(base);
+        next.setDate(base.getDate() + 7);
+        while (next <= today) { next.setDate(next.getDate() + 7); }
+        return toISO(next);
       }
       if (repeatType === "monthly") {
         const targetDate = base.getDate();
-        // まず期限の翌月を試す
-        for (let m = 1; m <= 4; m++) {
-          const y = base.getFullYear(); const mo = base.getMonth() + m;
-          const lastDay = new Date(y, mo + 1, 0).getDate();
+        // 期限の翌月から順に今日より後の日付を探す
+        for (let m = 1; m <= 24; m++) {
+          const mo = base.getMonth() + m;
+          const y = base.getFullYear() + Math.floor(mo / 12);
+          const moAdj = mo % 12;
+          const lastDay = new Date(y, moAdj + 1, 0).getDate();
           const actualDate = Math.min(targetDate, lastDay);
-          const candidate = new Date(y, mo, actualDate);
+          const candidate = new Date(y, moAdj, actualDate);
           if (candidate > today) return toISO(candidate);
         }
         return null;
@@ -139,7 +138,7 @@
       }
       return null;
     }
-
+ 
     function repeatLabel(repeatType, repeatValue) {
       if (!repeatType) return null;
       if (repeatType === "weekly") return "毎週";
@@ -155,7 +154,7 @@
       }
       return null;
     }
-
+ 
     function RepeatSelector({ repeatType, setRepeatType, repeatValue, setRepeatValue }) {
       const [customMode, setCustomMode] = useState(() => {
         if (!repeatValue) return "weekdays";
@@ -243,7 +242,7 @@
         </div>
       );
     }
-
+ 
     function App() {
       const [projects, setProjects] = useState([]);
       const [tasks, setTasks] = useState([]);
@@ -263,7 +262,7 @@
       const [eventEdit, setEventEdit] = useState(null);
       const [imageUploading, setImageUploading] = useState(false);
       const [showReminders, setShowReminders] = useState(true);
-
+ 
       const [overdueModal, setOverdueModal] = useState(null);
       const [taskMenu, setTaskMenu] = useState(null);
       const [showAddMenu, setShowAddMenu] = useState(false);
@@ -274,7 +273,7 @@
       const [newProjInDialogName, setNewProjInDialogName] = useState("");
       const [viewMode, setViewMode] = useState("calendar");
       const [movingProjId, setMovingProjId] = useState(null); // "calendar" | "list" | "calonly"
-
+ 
       useEffect(() => {
         (async () => {
           const { data: ps } = await sb.from("projects").select("*").order("position");
@@ -317,7 +316,7 @@
         document.addEventListener("visibilitychange", handleVisibility);
         return () => { stopSubs(); document.removeEventListener("visibilitychange", handleVisibility); };
       }, []);
-
+ 
       const addProject = async () => {
         if (!newProjName.trim()) return;
         const color = COLORS[projects.length % COLORS.length];
@@ -381,7 +380,7 @@
         setNewProjInDialogName("");
         setNewProjInDialog(false);
       };
-
+ 
       const saveEvent = async () => {
         if (!eventEdit || !eventEdit.title.trim() || !eventEdit.date) return;
         if (eventEdit.id === null) {
@@ -419,26 +418,26 @@
         await updateTask(editTask.id, { image_url: null });
         setEditTask(t => ({...t, image_url: null}));
       };
-
+ 
       const visibleTasks = tasks.filter(t => {
         if (selProj && t.project_id !== selProj) return false;
         if (filter === "active" && t.done) return false;
         if (filter === "done" && !t.done) return false;
         return true;
       }).sort((a, b) => { const da = diffDays(a.deadline) ?? 9999; const db = diffDays(b.deadline) ?? 9999; return da - db || new Date(a.created_at) - new Date(b.created_at); });
-
+ 
       const proj = (pid) => projects.find(p => p.id === pid);
       const reminders = tasks.filter(t => { if (t.done || dismissed[t.id]) return false; return (t.priority || 0) > 0; }).sort((a, b) => (b.priority||0) - (a.priority||0) || diffDays(a.deadline) - diffDays(b.deadline));
-
+ 
       function reminderColor(diff) {
         if (diff === null || diff > 3) return { bg:"#fffbeb", border:"#fde68a", dot:"#f59e0b", text:"#f59e0b" };
         if (diff <= 0) return { bg:"#fff5f5", border:"#fecaca", dot:"#ef4444", text:"#ef4444" };
         if (diff <= 1) return { bg:"#fff7ed", border:"#fed7aa", dot:"#f97316", text:"#f97316" };
         return { bg:"#fffbeb", border:"#fde68a", dot:"#f59e0b", text:"#f59e0b" };
       }
-
+ 
       const currentProj = selProj ? proj(selProj) : null;
-
+ 
       const sidebarContent = (
         <>
           <div style={{ padding:"0 12px 10px", fontWeight:700, fontSize:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -509,7 +508,7 @@
           </div>
         </>
       );
-
+ 
       return (
         <div id="app-wrapper">
         <div style={{ display:"flex", flexDirection:"column", height:"100vh", fontFamily:"'Helvetica Neue',Arial,'Hiragino Sans',sans-serif", background:"#f5f5f5", color:"#1a1a1a", fontSize:12 }}>
@@ -551,7 +550,7 @@
               </div>
             );
           })()}
-
+ 
           <div style={{ display:"flex", flex:1, overflow:"hidden", position:"relative" }}>
             {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
             <div className={`sidebar${sidebarOpen ? " open" : ""}`}>{sidebarContent}</div>
@@ -581,7 +580,7 @@
                 </div>
                 {reminders.length > 0 && <button onClick={() => setShowReminders(r=>!r)} style={{ background:"none", border:"none", cursor:"pointer", color:showReminders?"#6366f1":"#bbb", fontSize:14, padding:"0 2px", lineHeight:1, flexShrink:0 }}>{showReminders ? "🔔" : "🔕"}</button>}
               </div>
-
+ 
               {viewMode === "calonly" && (
                 <TwoWeekCalendar tasks={[]} events={events} proj={proj} onTaskClick={(t) => setTaskMenu(t)} onOverdueClick={(t) => setOverdueModal(t)} onEventClick={(ev) => setEventEdit({...ev})} daysCount={90} pastDays={60} />
               )}
@@ -653,7 +652,7 @@
               })()}
             </div>
           </div>
-
+ 
           <div style={{ position:"fixed", bottom:20, right:16, display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8, zIndex:50 }}>
             {showAddMenu && (
               <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:4 }}>
@@ -676,7 +675,7 @@
                 style={{ width:48, height:48, borderRadius:"50%", background:showAddMenu?"#555":"#1a1a1a", color:"#fff", border:"none", fontSize:24, cursor:"pointer", boxShadow:"0 4px 12px rgba(0,0,0,0.2)", display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1, transition:"transform 0.2s", transform:showAddMenu?"rotate(45deg)":"rotate(0deg)" }}>+</button>
             </div>
           </div>
-
+ 
           {taskMenu && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={() => setTaskMenu(null)}>
               <div style={{ background:"#fff", borderRadius:"14px 14px 0 0", padding:"20px", width:"100%", maxWidth:480 }} onClick={e => e.stopPropagation()}>
@@ -691,7 +690,7 @@
               </div>
             </div>
           )}
-
+ 
           {overdueModal && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setOverdueModal(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"20px", width:300, maxHeight:"70vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
@@ -715,7 +714,7 @@
               </div>
             </div>
           )}
-
+ 
           {eventEdit && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setEventEdit(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:300, maxHeight:"90vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
@@ -753,7 +752,7 @@
               </div>
             </div>
           )}
-
+ 
           {editTask && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setEditTask(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:300, maxHeight:"90vh", overflowY:"auto" }} onClick={e => e.stopPropagation()}>
@@ -823,7 +822,7 @@
               </div>
             </div>
           )}
-
+ 
           {confirmTask && (
             <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={() => setConfirmTask(null)}>
               <div style={{ background:"#fff", borderRadius:14, padding:"24px 20px", width:260, textAlign:"center" }} onClick={e => e.stopPropagation()}>
@@ -844,7 +843,7 @@
         </div>
       );
     }
-
+ 
     function TwoWeekCalendar({ tasks, events, proj, onTaskClick, onOverdueClick, onEventClick, daysCount, pastDays }) {
       const { useEffect: ue, useRef, useLayoutEffect } = React;
       const todayRef = useRef(null);
@@ -925,7 +924,7 @@
         </div>
       );
     }
-
+ 
     function SideItem({ label, count, active, color, onClick, onDelete }) {
       const [hover, setHover] = useState(false);
       return (
@@ -941,7 +940,7 @@
         </div>
       );
     }
-
+ 
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
